@@ -16,6 +16,7 @@ struct Home: View {
     
     /// View Properties
     @State private var showDetailView: Bool = false
+    @State private var detailViewAnimation: Bool = false
     @State private var selectedPicID: UUID?
     @State private var posts: [Post] = samplePosts
     @State private var selectedPost: Post?
@@ -36,6 +37,7 @@ struct Home: View {
             if let selectedPost, showDetailView {
                 DetailView(
                     showDetailView: $showDetailView,
+                    detailViewAnimation: $detailViewAnimation,
                     post: selectedPost,
                     selectedPicID: $selectedPicID
                 ) { id in
@@ -47,6 +49,41 @@ struct Home: View {
                 .transition(.offset(y: 5))
             }
         }
+        .overlayPreferenceValue(OffsetKey.self) { value in
+            GeometryReader { proxy in
+                if let selectedPicID,
+                   let source = value[selectedPicID.uuidString],
+                   let destination = value["DESTINATION\(selectedPicID.uuidString)"],
+                   let picItem = selectedImage(),
+                   showDetailView
+                {
+                    let sRect = proxy[source]
+                    let dRect = proxy[destination]
+                    
+                    Image(picItem.image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(
+                            width: detailViewAnimation ? dRect.width : sRect.width,
+                            height: detailViewAnimation ? dRect.height : sRect.height
+                        )
+                        .clipShape(.rect(cornerRadius: detailViewAnimation ? 0 : 10))
+                        .offset(
+                            x: detailViewAnimation ? dRect.minX : sRect.minX,
+                            y: detailViewAnimation ? dRect.minY : sRect.minY
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+    
+    /// Selected Image
+    func selectedImage() -> PicItem? {
+        if let pic = selectedPost?.pics.first(where: { $0.id == selectedPicID }) {
+            return pic
+        }
+        return nil
     }
     
     /// Card View
@@ -98,12 +135,17 @@ struct Home: View {
                                 }
                                 .frame(maxWidth: size.width)
                                 .frame(height: size.height)
+                                /// Anchor
+                                .anchorPreference(key: OffsetKey.self, value: .bounds, transform: { anchor in
+                                    return [pic.id.uuidString: anchor]
+                                })
                                 .onTapGesture {
                                     selectedPost = post
                                     selectedPicID = pic.id
                                     showDetailView = true
                                 }
                                 .contentShape(.rect)
+                                .opacity(selectedPicID == pic.id ? 0 : 1)
                             }
                         }
                         .scrollTargetLayout()
@@ -163,11 +205,17 @@ struct Home: View {
 struct DetailView: View {
     
     @Binding var showDetailView: Bool
+    @Binding var detailViewAnimation: Bool
     var post: Post
     @Binding var selectedPicID: UUID?
     var updateScrollPosition: (UUID?) -> ()
     /// View properties
     @State private var detailScrollPosition: UUID?
+    /// Dispatch Tasks
+    @State private var startTask1: DispatchWorkItem?
+    @State private var startTask2: DispatchWorkItem?
+    @State private var endTask1: DispatchWorkItem?
+    @State private var endTask2: DispatchWorkItem?
     
     var body: some View {
         ScrollView(.horizontal) {
@@ -178,19 +226,37 @@ struct DetailView: View {
                         .aspectRatio(contentMode: .fit)
                         .containerRelativeFrame(.horizontal)
                         .clipped()
+                        .anchorPreference(key: OffsetKey.self, value: .bounds) { anchor in
+                            return ["DESTINATION\(pic.id.uuidString)": anchor]
+                        }
+                        .opacity(selectedPicID == pic.id ? 0 : 1)
                 }
             }
             .scrollTargetLayout()
         }
         .scrollPosition(id: $detailScrollPosition)
         .background(.black)
+        .opacity(detailViewAnimation ? 1 : 0)
         .scrollTargetBehavior(.paging)
         .scrollIndicators(.hidden)
         .overlay(alignment: .topLeading) {
             Button {
+                
+                cancelTasks()
+                
                 updateScrollPosition(detailScrollPosition)
-                showDetailView = false
-                selectedPicID = nil
+                selectedPicID = detailScrollPosition
+                initiateTask(ref: &startTask1, task: .init(block: {
+                    withAnimation(.snappy(duration: 0.3, extraBounce: 0)) {
+                        detailViewAnimation = false
+                    }
+                    
+                    /// Removing LayerView
+                    initiateTask(ref: &startTask2, task: .init(block: {
+                        showDetailView = false
+                        selectedPicID = nil
+                    }), duration: 0.3)
+                }), duration: 0.05)
             } label: {
                 Image(systemName: "xmark.circle.fill")
             }
@@ -199,8 +265,40 @@ struct DetailView: View {
             .padding()
         }
         .onAppear {
+            
+            cancelTasks()
+            
             guard detailScrollPosition == nil else { return }
             detailScrollPosition = selectedPicID
+            /// Giving some time to set the scroll position
+            initiateTask(ref: &startTask1, task: .init(block: {
+                withAnimation(.snappy(duration: 0.3, extraBounce: 0)) {
+                    detailViewAnimation = true
+                }
+                
+                /// Removing LayerView
+                initiateTask(ref: &startTask2, task: .init(block: {
+                    selectedPicID = nil
+                }), duration: 0.3)
+            }), duration: 0.05)
+        }
+    }
+    
+    /// Initialize task
+    func initiateTask(ref: inout DispatchWorkItem?, task: DispatchWorkItem, duration: CGFloat) {
+        ref = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: task)
+    }
+    
+    /// Cancelling Previous Tasks
+    func cancelTasks() {
+        if let startTask1,
+           let startTask2
+        {
+            startTask1.cancel()
+            startTask2.cancel()
+            self.startTask1 = nil
+            self.startTask2 = nil
         }
     }
 }

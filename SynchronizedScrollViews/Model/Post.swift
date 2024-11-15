@@ -19,9 +19,13 @@ struct Post: Identifiable {
 /// Sample Posts
 var samplePosts: [Post] = [
     .init(username: "iJustine", content: "Nature Pics", pics: pics),
-    .init(username: "iJustine", content: "Nature Pics", pics: pics.reversed())
+    .init(username: "iJustine", content: "Nature Pics", pics: pics1)
 ]
 
 private var pics: [PicItem] = (1...5).compactMap { index -> PicItem? in
+    return .init(image: "image\(index)")
+}
+
+private var pics1: [PicItem] = (1...5).reversed().compactMap { index -> PicItem? in
     return .init(image: "image\(index)")
 }
